@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 from typing import Any, AsyncIterator, Sequence
 
 import anyio
@@ -64,6 +64,7 @@ class MockMCPClient:
         self._session: ClientSession | None = None
         self._read_stream: MemoryObjectReceiveStream[Any] | None = None
         self._write_stream: MemoryObjectSendStream[Any] | None = None
+        self._exit_stack: AsyncExitStack | None = None
 
     async def __aenter__(self) -> MockMCPClient:
         """Enter async context and initialize connection."""
@@ -76,28 +77,51 @@ class MockMCPClient:
 
     async def connect(self) -> None:
         """Establish connection to the MCP server."""
-        try:
-            # Create stdio client connection
-            async with stdio_client(self._server_params) as (read, write):
-                self._read_stream = read
-                self._write_stream = write
+        if self._session is not None:
+            logger.warning("Client is already connected")
+            return
 
-                # Initialize session
-                async with ClientSession(read, write) as session:
-                    self._session = session
-                    await session.initialize()
-                    logger.debug("MockMCPClient connected successfully")
+        try:
+            # Use AsyncExitStack to manage nested context managers
+            self._exit_stack = AsyncExitStack()
+
+            # Enter stdio_client context and keep it alive
+            read, write = await self._exit_stack.enter_async_context(
+                stdio_client(self._server_params)
+            )
+            self._read_stream = read
+            self._write_stream = write
+
+            # Enter ClientSession context and keep it alive
+            session = await self._exit_stack.enter_async_context(
+                ClientSession(read, write)
+            )
+            self._session = session
+
+            # Initialize the session
+            await session.initialize()
+            logger.debug("MockMCPClient connected successfully")
 
         except Exception as e:
+            # Clean up on error
+            if self._exit_stack:
+                await self._exit_stack.aclose()
+                self._exit_stack = None
+            self._session = None
+            self._read_stream = None
+            self._write_stream = None
             logger.error(f"Failed to connect to MCP server: {e}")
             raise ConnectionError(f"Could not connect to MCP server: {e}") from e
 
     async def disconnect(self) -> None:
         """Close connection to the MCP server."""
-        if self._session:
-            # Session cleanup is handled by context manager
-            self._session = None
-            logger.debug("MockMCPClient disconnected")
+        if self._exit_stack:
+            await self._exit_stack.aclose()
+            self._exit_stack = None
+        self._session = None
+        self._read_stream = None
+        self._write_stream = None
+        logger.debug("MockMCPClient disconnected")
 
     @property
     def is_connected(self) -> bool:
