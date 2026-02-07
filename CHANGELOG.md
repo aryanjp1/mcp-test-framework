@@ -5,6 +5,18 @@ All notable changes to pytest-mcp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-02-07
+
+### Fixed
+- Fixed stdio client connection issue using AsyncExitStack to properly manage nested context managers
+- Streams and session now stay alive for the entire client lifetime
+- Fixed ClosedResourceError when calling MCP tools
+- Added hasattr check for asyncio_mode in plugin to prevent AttributeError
+- Updated repository URLs in pyproject.toml to match renamed repo
+
+### Changed
+- Build configuration now uses metadata version 2.1 for PyPI compatibility
+
 ## [0.1.0] - 2026-02-07
 
 ### Added
